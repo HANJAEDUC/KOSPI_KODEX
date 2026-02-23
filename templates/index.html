@@ -15,8 +15,24 @@
     <div class="header-container">
         <h1>📊 주식 스크리닝 대시보드</h1>
         <p class="subtitle">KOSPI & KOSDAQ 전략</p>
-        <div class="status-bar">
-            <span>신호 업데이트일: <strong id="signal-date">-</strong></span>
+        <div class="status-bar" style="display:flex; align-items:center; gap:15px;">
+            <span>기준일 선택: <input type="date" id="global-target-date" style="padding:4px; border-radius:4px; border:1px solid #ccc; font-family:inherit;"></span>
+            <span>최대 종목수: 
+                <select id="global-top-n" style="padding:4px; border-radius:4px; border:1px solid #ccc; font-family:inherit;">
+                    <option value="100">100개</option>
+                    <option value="200">200개</option>
+                    <option value="300">300개</option>
+                    <option value="400">400개</option>
+                    <option value="500" selected>500개</option>
+                    <option value="600">600개</option>
+                    <option value="700">700개</option>
+                    <option value="800">800개</option>
+                    <option value="900">900개</option>
+                    <option value="1000">1000개</option>
+                    <option value="0">전체 (최대)</option>
+                </select>
+            </span>
+            <span>마지막 데이터 업데이트: <strong id="signal-date">-</strong></span>
         </div>
     </div>
     </header>
@@ -30,11 +46,9 @@
                 <div class="scanner-panel" style="font-size:12px;">
                     <button id="btn-scan-price" class="btn btn-primary"
                         onclick="startScan('price_gc', 'btn-scan-price', 'prog-price')">🚀 스캔 실행</button>
-                    <div id="prog-price" style="display: none; width:200px; text-align:left;">
-                        <div class="progress-bar-bg">
-                            <div class="progress-bar-fill" id="fill-price"></div>
-                        </div>
-                        <div class="progress-text" id="msg-price">대기 중...</div>
+                    <div id="prog-price" style="display: none; width:300px; text-align:left; align-items:center;">
+                        <span id="msg-price" style="flex:1;">대기 중...</span>
+                        <button id="btn-stop-price" class="btn btn-danger" style="margin-left:8px; padding:2px 6px; font-size:11px;" onclick="stopScan('price_gc', 'btn-scan-price', 'prog-price', 'btn-stop-price')">🛑중지</button>
                     </div>
                 </div>
             </h2>
@@ -84,11 +98,9 @@
                 <div class="scanner-panel" style="font-size:12px;">
                     <button id="btn-scan-vol" class="btn btn-primary"
                         onclick="startScan('vol_gc', 'btn-scan-vol', 'prog-vol')">🚀 스캔 실행</button>
-                    <div id="prog-vol" style="display: none; width:200px; text-align:left;">
-                        <div class="progress-bar-bg">
-                            <div class="progress-bar-fill" id="fill-vol"></div>
-                        </div>
-                        <div class="progress-text" id="msg-vol">대기 중...</div>
+                    <div id="prog-vol" style="display: none; width:300px; text-align:left; align-items:center;">
+                        <span id="msg-vol" style="flex:1;">대기 중...</span>
+                        <button id="btn-stop-vol" class="btn btn-danger" style="margin-left:8px; padding:2px 6px; font-size:11px;" onclick="stopScan('vol_gc', 'btn-scan-vol', 'prog-vol', 'btn-stop-vol')">🛑중지</button>
                     </div>
                 </div>
             </h2>
@@ -137,11 +149,9 @@
                 <div class="scanner-panel" style="font-size:12px;">
                     <button id="btn-scan-pb" class="btn btn-primary"
                         onclick="startScan('pullback', 'btn-scan-pb', 'prog-pb')">🚀 스캔 실행</button>
-                    <div id="prog-pb" style="display: none; width:200px; text-align:left;">
-                        <div class="progress-bar-bg">
-                            <div class="progress-bar-fill" id="fill-pb"></div>
-                        </div>
-                        <div class="progress-text" id="msg-pb">대기 중...</div>
+                    <div id="prog-pb" style="display: none; width:300px; text-align:left; align-items:center;">
+                        <span id="msg-pb" style="flex:1;">대기 중...</span>
+                        <button id="btn-stop-pb" class="btn btn-danger" style="margin-left:8px; padding:2px 6px; font-size:11px;" onclick="stopScan('pullback', 'btn-scan-pb', 'prog-pb', 'btn-stop-pb')">🛑중지</button>
                     </div>
                 </div>
             </h2>
@@ -200,12 +210,15 @@
         // 오늘 날짜 및 영업일 설정
         function getRecentBusinessDay() {
             const d = new Date();
-            if (d.getHours() < 9) d.setDate(d.getDate() - 1);
+            if (d.getHours() < 15) d.setDate(d.getDate() - 1);
             while (d.getDay() === 0 || d.getDay() === 6) {
                 d.setDate(d.getDate() - 1);
             }
             return d.toISOString().split('T')[0];
         }
+        
+        // 기준일 초기값 세팅
+        document.getElementById('global-target-date').value = getRecentBusinessDay();
 
         // 탭 전환 로직
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -238,20 +251,39 @@
 
                     highlightTodaySignals();
                 }
-            } catch (e) { console.error('Signal fetch error:', e); }
+            } catch (e) {
+                console.error('Signal fetch error:', e);
+                // 오류나 데이터 없음 시 빈 테이블 렌더링 유지
+            }
         }
 
         // 분리된 스캐너 실행 로직
         const intervals = {};
 
         async function startScan(target, btnId, progId) {
-            if (!confirm(`해당 패턴( ${target} )의 최신 데이터를 스캔합니다 (약 5~10분 소요). 시작하시겠습니까?`)) return;
+            const selectedDate = document.getElementById('global-target-date').value;
+            const topN = document.getElementById('global-top-n').value;
+            let topNStr = topN == '0' ? '전체 종목' : `상위 ${topN}개`;
+            
+            if (!confirm(`해당 패턴( ${target} )의 최신 데이터를 [ ${selectedDate} ] 기준, ${topNStr} 대상으로 스캔합니다. 시작하시겠습니까?`)) return;
+
+            // 스캔 시작 전 테이블 클리어
+            if (target === 'price_gc') {
+                renderTable('tbody-gc-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'MA20', 'MA200', '갭(%)', '크로스일']);
+                renderTable('tbody-gc-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'MA20', 'MA200', '갭(%)', '크로스일']);
+            } else if (target === 'vol_gc') {
+                renderTable('tbody-vol-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
+                renderTable('tbody-vol-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
+            } else if (target === 'pullback') {
+                renderTable('tbody-pb-kospi', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+                renderTable('tbody-pb-kosdaq', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+            }
 
             try {
                 const res = await fetch('/api/scan/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target: target })
+                    body: JSON.stringify({ target: target, target_date: selectedDate, top_n: parseInt(topN) })
                 });
                 const json = await res.json();
 
@@ -263,9 +295,27 @@
             } catch (e) { alert("서버 통신 오류"); }
         }
 
+        async function stopScan(target, btnId, progId, stopBtnId) {
+            try {
+                const res = await fetch('/api/scan/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target: target })
+                });
+                const json = await res.json();
+                if (!json.ok) {
+                    alert(json.message);
+                } else {
+                    document.getElementById(stopBtnId).style.display = 'none';
+                    document.getElementById(progId).style.display = 'none';
+                    document.getElementById(btnId).style.display = 'inline-block';
+                }
+            } catch (e) { alert("서버 통신 오류"); }
+        }
+
         function monitorScan(target, btnId, progId) {
             document.getElementById(btnId).style.display = 'none';
-            document.getElementById(progId).style.display = 'block';
+            document.getElementById(progId).style.display = 'flex';
 
             if (intervals[target]) clearInterval(intervals[target]);
 
@@ -285,20 +335,49 @@
                         const fillEl = document.getElementById(`fill-${prefix}`);
                         const msgEl = document.getElementById(`msg-${prefix}`);
 
-                        fillEl.style.width = `${state.progress}%`;
-                        msgEl.innerHTML = `<strong>${state.progress.toFixed(1)}%</strong> | ${state.message} (발견: ${state.signals_found})`;
+                        msgEl.innerHTML = `${state.message} (발견: ${state.signals_found})`;
+                        
+                        // 발견된 종목 실시간 렌더링
+                        if (state.found_items && state.found_items.length > 0) {
+                            const kospiItems = state.found_items.filter(i => i.market === 'KOSPI').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
+                            const kosdaqItems = state.found_items.filter(i => i.market === 'KOSDAQ').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
+                            
+                            if (target === 'price_gc') {
+                                renderTable('tbody-gc-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
+                                renderTable('tbody-gc-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
+                            } else if (target === 'vol_gc') {
+                                renderTable('tbody-vol-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
+                                renderTable('tbody-vol-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
+                            } else if (target === 'pullback') {
+                                renderTable('tbody-pb-kospi', kospiItems, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
+                                renderTable('tbody-pb-kosdaq', kosdaqItems, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
+                            }
+                        }
+                        
+                        const stopBtnEl = document.getElementById(`btn-stop-${prefix}`);
+                        if (stopBtnEl && state.is_running) {
+                            stopBtnEl.style.display = 'inline-block';
+                        }
 
                         if (!state.is_running && state.progress >= 100) {
                             clearInterval(intervals[target]);
-                            msgEl.innerHTML = "✅ 완료! (새로고침 시 반영)";
+                            msgEl.innerHTML = "✅ 스캔 완료! (데이터 갱신 중...)";
+                            if (stopBtnEl) stopBtnEl.style.display = 'none';
+                            document.getElementById(btnId).style.display = 'inline-block';
+                            
+                            // 페이지 새로고침(F5) 없이 즉시 리스트 새로고침
+                            fetchSignals().then(() => {
+                                msgEl.innerHTML = "✅ 스캔 및 업데이트 완료!";
+                            });
                         } else if (!state.is_running && state.progress < 100 && state.progress > 0) {
                             clearInterval(intervals[target]);
-                            msgEl.innerHTML = "❌ 상태 오류";
+                            // 오류나 중지됨
                             document.getElementById(btnId).style.display = 'inline-block';
+                            if (stopBtnEl) stopBtnEl.style.display = 'none';
                         }
                     }
                 } catch (e) { }
-            }, 2000);
+            }, 500); // 0.5초마다 (더 부드러운 리얼타임 표현)
         }
 
         // 일반 테이블 렌더링
@@ -358,8 +437,17 @@
             });
         }
 
-        // 초기 로딩
-        fetchSignals();
+        function initEmptyTables() {
+            renderTable('tbody-gc-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'MA20', 'MA200', '갭(%)', '크로스일']);
+            renderTable('tbody-gc-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'MA20', 'MA200', '갭(%)', '크로스일']);
+            renderTable('tbody-vol-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
+            renderTable('tbody-vol-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
+            renderTable('tbody-pb-kospi', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+            renderTable('tbody-pb-kosdaq', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+        }
+
+        // 초기 로딩: 스캔 결과 무조건 숨기고 텅 빈 상태로 시작 (스캔 버튼을 눌러야만 표시)
+        initEmptyTables();
 
     </script>
 </body>

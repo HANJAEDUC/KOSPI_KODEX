@@ -28,14 +28,18 @@ from pykrx import stock
 import pandas as pd
 import numpy as np
 import time
+import sys
 from typing import Optional
+
+# stdout/stderr 강제 UTF-8 모드 및 실시간 출력(버퍼링 제거) 방침
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', line_buffering=True, write_through=True)
+if sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', line_buffering=True, write_through=True)
 
 # ──────────────────────────────────────────────
 # 설정
 # ──────────────────────────────────────────────
-TOP_N         = 500
-BASE_DATE     = '20260220'   # 기준일 (2/20)
-START_DATE    = '20250101'   # 200일 MA 충분히 확보
 GC_LOOKBACK   = 30           # 골든크로스 탐색 범위: 최근 몇 날 이내
 PULLBACK_MIN  = 3            # GC 이후 최소 눌림 대기일
 PULLBACK_MAX  = 10           # GC 이후 최대 눌림 대기일
@@ -49,7 +53,10 @@ SIGNAL_LOOKBACK = 3          # 매수 신호 탐색: 눌림 이후 최근 N일
 # ──────────────────────────────────────────────
 def get_top_tickers(market: str, n: int) -> pd.DataFrame:
     df = fdr.StockListing(market)
-    df = df.sort_values('Marcap', ascending=False).head(n).copy()
+    df = df.sort_values('Marcap', ascending=False)
+    if n > 0:
+        df = df.head(n)
+    df = df.copy()
     df['시가총액(억원)'] = (df['Marcap'] / 1e8).astype(int)
     df = df.rename(columns={'Code': '종목코드', 'Name': '종목명', 'Close': '종가'})
     df = df.set_index('종목코드')[['종목명', '시가총액(억원)', '종가']]
@@ -127,9 +134,9 @@ def scan_strategy(df: pd.DataFrame) -> dict | None:
         if pd.isna(curr_ma20):
             continue
 
-        # 눌림 조건: 저가 또는 종가가 MA20 기준 ±TOUCH_MARGIN 이내
-        touch_low   = curr_low   <= curr_ma20 * (1 + TOUCH_MARGIN)
-        touch_close = curr_close <= curr_ma20 * (1 + TOUCH_MARGIN)
+        # 눌림 조건: 저가 또는 종가가 MA20 기준 ±TOUCH_MARGIN (±2%) 이내로 진입했는지 확인
+        touch_low   = (curr_ma20 * (1 - TOUCH_MARGIN) <= curr_low   <= curr_ma20 * (1 + TOUCH_MARGIN))
+        touch_close = (curr_ma20 * (1 - TOUCH_MARGIN) <= curr_close <= curr_ma20 * (1 + TOUCH_MARGIN))
 
         if touch_low or touch_close:
             pullback_idx  = i
@@ -170,7 +177,7 @@ def scan_strategy(df: pd.DataFrame) -> dict | None:
             if i == n - 1:
                 signal_type = '🔔 오늘 신호'
             else:
-                signal_type = f'발생({df.index[i].strftime("%m/%d")})'
+                signal_type = f'발생({df.index[i].strftime("%Y.%m.%d")})'
             break
 
     if signal_idx is None:
@@ -238,10 +245,20 @@ import argparse
 # MAIN
 # ──────────────────────────────────────────────
 if __name__ == '__main__':
+    from datetime import datetime, timedelta
     parser = argparse.ArgumentParser(description="주식 스크리닝 (GC, 눌림매수, 거래량GC 분리 실행)")
     parser.add_argument('--target', type=str, required=True, choices=['price_gc', 'vol_gc', 'pullback'],
                         help="스캔할 대상을 지정합니다: price_gc, vol_gc, pullback")
+    parser.add_argument('--target_date', type=str, default=None, help="기준일 (예: 2026-02-23)")
+    parser.add_argument('--top_n', type=int, default=500, help="조회할 시가총액 상위 종목 수 (0이면 전체)")
     args = parser.parse_args()
+
+    if args.target_date:
+        base_date_dt = datetime.strptime(args.target_date, "%Y-%m-%d")
+    else:
+        base_date_dt = datetime.now()
+    BASE_DATE = base_date_dt.strftime("%Y%m%d")
+    START_DATE = (base_date_dt - timedelta(days=400)).strftime("%Y%m%d")
 
     print("=" * 60)
     print(f"전략: 단일 스크리너 실행 (타겟: {args.target})")
@@ -253,11 +270,12 @@ if __name__ == '__main__':
     all_vol_gcs = {}
 
     for market in ['KOSPI', 'KOSDAQ']:
-        print(f"\n[{market}] 시가총액 상위 {TOP_N}개 추출 중...")
-        top_df  = get_top_tickers(market, TOP_N)
+        print(f"\n[{market}] 시가총액 상위 {args.top_n if args.top_n > 0 else '전체'}개 추출 중...", flush=True)
+        top_df  = get_top_tickers(market, args.top_n)
         tickers = top_df.index.tolist()
+        total_tickers = len(tickers)
 
-        print(f"\n[{market}] 전략 스캔 시작...")
+        print(f"\n[{market}] 전략 스캔 시작 (총 {total_tickers}개 종목)...", flush=True)
         t0 = time.time()
         
         pb_signals = []
@@ -275,20 +293,35 @@ if __name__ == '__main__':
                         '종가': result['종가']
                     }
                     
+                    found_item = None
                     if args.target == 'pullback' and result['pullback']:
-                        pb_signals.append((ticker, {**base_info, **result['pullback']}))
+                        found_item = {**base_info, **result['pullback']}
+                        pb_signals.append((ticker, found_item))
                     elif args.target == 'price_gc' and result['price_gc']:
-                        pgc_signals.append((ticker, {**base_info, **result['price_gc']}))
+                        found_item = {**base_info, **result['price_gc']}
+                        pgc_signals.append((ticker, found_item))
                     elif args.target == 'vol_gc' and result['vol_gc']:
-                        vgc_signals.append((ticker, {**base_info, **result['vol_gc']}))
+                        found_item = {**base_info, **result['vol_gc']}
+                        vgc_signals.append((ticker, found_item))
+                        
+                    if found_item:
+                        import json
+                        import numpy as np
+                        def _cvt(v):
+                            if isinstance(v, (np.integer, np.int64)): return int(v)
+                            elif isinstance(v, (np.floating, np.float64)): return float(v)
+                            elif pd.isna(v): return None
+                            return v
+                        clean_item = {k: _cvt(v) for k, v in found_item.items()}
+                        print(f"!!!FOUND_JSON!!! {json.dumps({'market': market, 'item': clean_item}, ensure_ascii=False)}", flush=True)
             except Exception:
                 pass
 
-            if i % 50 == 0 or i == TOP_N:
+            if True: # 모든 종목(매 루프)마다 실시간 출력 (리얼타임 퍼센트 적용)
                 elapsed = time.time() - t0
                 # 현재 처리 중인 타겟에 맞춰 진행 상황 출력 (정규식 매칭용)
                 current_len = len(pb_signals) if args.target == 'pullback' else (len(pgc_signals) if args.target == 'price_gc' else len(vgc_signals))
-                print(f"  [{i:>3}/{TOP_N}] {i/TOP_N*100:5.1f}% 완료...  신호 {current_len}개 발견  ({elapsed:.0f}s)")
+                print(f"  [{i:>3}/{total_tickers}] {i/total_tickers*100:5.1f}% 완료...  신호 {current_len}개 발견  ({elapsed:.0f}s)", flush=True)
             time.sleep(SLEEP_SEC)
 
         # DataFrame 변환 및 저장 헬퍼 함수
@@ -303,10 +336,13 @@ if __name__ == '__main__':
             if sort_col in res_df.columns:
                 res_df = res_df.sort_values(sort_col, ascending=asc)
             
-            # 순위(시총) 부여
-            res_df.insert(0, '순위(시총)', range(1, len(res_df)+1))
+            # 순위 추가 및 인덱스 초기화
+            res_df = res_df.reset_index()
+            res_df.insert(0, '순위', range(1, len(res_df)+1))
+            res_df = res_df.rename(columns={'index': '종목코드'})
             
-            fname = f'/Users/jaeduchan/Documents/jhan/antigravity/KOSPI_KODEX/{market_name.lower()}_{prefix}.csv'
+            import os
+            fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'{market_name.lower()}_{prefix}.csv')
             res_df.to_csv(fname, encoding='utf-8-sig')
             return res_df
 
@@ -323,7 +359,7 @@ if __name__ == '__main__':
 # ──────────────────────────────────────────────
 print("\n" + "=" * 60)
 for market in ['KOSPI', 'KOSDAQ']:
-    df = all_signals.get(market, pd.DataFrame())
+    df = all_pullback_signals.get(market, pd.DataFrame())
     print(f"\n=== {market} 골든크로스 눌림 매수 신호 (총 {len(df)}개) ===")
     if not df.empty:
         print(df.to_string(index=True))
@@ -331,5 +367,4 @@ for market in ['KOSPI', 'KOSDAQ']:
         print("  없음")
 
 print("\n✅ 완료!")
-print("  kospi_gc_pullback_signal.csv")
-print("  kosdaq_gc_pullback_signal.csv")
+print("  저장 완료되었습니다.")

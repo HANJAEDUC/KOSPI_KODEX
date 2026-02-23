@@ -31,16 +31,16 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
     state['process'] = None
     state['found_items'] = []
     
+    import sys
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'strategy_golden_pullback.py')
     
     try:
-        cmd = ['python', '-u', script_path, '--target', target_type]
+        cmd = [sys.executable, '-u', script_path, '--target', target_type]
         if target_date:
             cmd.extend(['--target_date', target_date])
         if top_n is not None:
             cmd.extend(['--top_n', str(top_n)])
             
-        import os
         env = os.environ.copy()
         
         process = subprocess.Popen(
@@ -55,11 +55,13 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
         )
         state['process'] = process
         
-        # 정규식 패턴: [250/500] 50.0% 완료... 신호 4개 발견
-        pattern = re.compile(r'\[\s*(\d+)/(\d+)\]\s*([\d.]+)%\s*완료.*?신호\s*(\d+)개')
+        # 정규식 패턴: [25/500] 신호 4개 (퍼센트 삭제)
+        pattern = re.compile(r'\[\s*(\d+)/(\d+)\]\s*.*신호\s*(\d+)개')
         current_market = ""
 
-        for line in process.stdout:
+        for line in iter(process.stdout.readline, ''):
+            if not line:
+                break
             line = line.strip()
             print("DBG-LINE:", line)
             if not line:
@@ -91,10 +93,12 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
             if match:
                 current_cnt = int(match.group(1))
                 total_cnt = int(match.group(2))
-                raw_pct = float(match.group(3))
-                sigs = int(match.group(4))
+                sigs = int(match.group(3))
                 
+                # 단순히 몇 개 중 몇 개 째인지에 따라 가상 프로그레스 (0~100) 계산
                 # KOSPI 50%, KOSDAQ 50% 분배
+                raw_pct = (current_cnt / total_cnt) * 100.0 if total_cnt > 0 else 0
+                
                 if current_market == "KOSPI":
                     state['progress'] = raw_pct / 2
                     state['message'] = f'[1/2] KOSPI 탐색 중... ({current_cnt}/{total_cnt})'

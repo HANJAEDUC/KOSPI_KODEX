@@ -44,7 +44,7 @@ GC_LOOKBACK   = 30           # 골든크로스 탐색 범위: 최근 몇 날 이
 PULLBACK_MIN  = 3            # GC 이후 최소 눌림 대기일
 PULLBACK_MAX  = 10           # GC 이후 최대 눌림 대기일
 TOUCH_MARGIN  = 0.02         # MA20 터치 허용 오차 (2%)
-SLEEP_SEC     = 0.3
+SLEEP_SEC     = 0.02         # (변경) 기존 0.3s -> 0.02s 로 대폭 축소하여 초고속 스캔 (pykrx 밴 조심)
 SIGNAL_LOOKBACK = 3          # 매수 신호 탐색: 눌림 이후 최근 N일
 
 
@@ -321,7 +321,7 @@ if __name__ == '__main__':
                 elapsed = time.time() - t0
                 # 현재 처리 중인 타겟에 맞춰 진행 상황 출력 (정규식 매칭용)
                 current_len = len(pb_signals) if args.target == 'pullback' else (len(pgc_signals) if args.target == 'price_gc' else len(vgc_signals))
-                print(f"  [{i:>3}/{total_tickers}] {i/total_tickers*100:5.1f}% 완료...  신호 {current_len}개 발견  ({elapsed:.0f}s)", flush=True)
+                print(f"  [{i:>3}/{total_tickers}] 신호 {current_len}개 발견  ({elapsed:.0f}s)", flush=True)
             time.sleep(SLEEP_SEC)
 
         # DataFrame 변환 및 저장 헬퍼 함수

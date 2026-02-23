@@ -26,7 +26,7 @@ body {
 
 /* Header */
 header {
-    margin-bottom: 30px;
+    margin-bottom: 20px;
     border-bottom: 1px solid var(--border);
     padding-bottom: 20px;
 }
@@ -50,17 +50,19 @@ header {
     gap: 15px;
     font-size: 13px;
     background: var(--bg-panel);
-    padding: 10px 15px;
-    border-radius: 8px;
-    display: inline-flex;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    margin-bottom: 25px; /* 가격 골든크로스 창간의 여백을 확보 */
 }
 
-.date-picker {
-    background: var(--bg-dark);
-    color: var(--text-main);
-    border: 1px solid var(--border);
-    padding: 4px 8px;
-    border-radius: 4px;
+.date-picker, select {
+    background: var(--bg-dark) !important;
+    color: var(--text-main) !important;
+    border: 1px solid var(--border) !important;
+    padding: 6px 10px !important;
+    border-radius: 6px !important;
     color-scheme: dark;
 }
 

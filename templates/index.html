@@ -15,10 +15,10 @@
     <div class="header-container">
         <h1>📊 주식 스크리닝 대시보드</h1>
         <p class="subtitle">KOSPI & KOSDAQ 전략</p>
-        <div class="status-bar" style="display:flex; align-items:center; gap:15px;">
-            <span>기준일 선택: <input type="date" id="global-target-date" style="padding:4px; border-radius:4px; border:1px solid #ccc; font-family:inherit;"></span>
+        <div class="status-bar">
+            <span>기준일 선택: <input type="date" id="global-target-date" class="date-picker"></span>
             <span>최대 종목수: 
-                <select id="global-top-n" style="padding:4px; border-radius:4px; border:1px solid #ccc; font-family:inherit;">
+                <select id="global-top-n">
                     <option value="100">100개</option>
                     <option value="200">200개</option>
                     <option value="300">300개</option>
@@ -163,6 +163,7 @@
                 <table class="data-table highlight-table">
                     <thead>
                         <tr>
+                            <th>순위</th>
                             <th>종목명</th>
                             <th>시가총액</th>
                             <th>종가</th>
@@ -178,6 +179,7 @@
                 <table class="data-table highlight-table">
                     <thead>
                         <tr>
+                            <th>순위</th>
                             <th>종목명</th>
                             <th>시가총액</th>
                             <th>종가</th>
@@ -246,8 +248,8 @@
                     renderTable('tbody-vol-kospi', json.data.vol_gc_kospi, ['순위(시총)', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
                     renderTable('tbody-vol-kosdaq', json.data.vol_gc_kosdaq, ['순위(시총)', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
 
-                    renderTable('tbody-pb-kospi', json.data.pullback_kospi, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
-                    renderTable('tbody-pb-kosdaq', json.data.pullback_kosdaq, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
+                    renderTable('tbody-pb-kospi', json.data.pullback_kospi, ['순위', '종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
+                    renderTable('tbody-pb-kosdaq', json.data.pullback_kosdaq, ['순위', '종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
 
                     highlightTodaySignals();
                 }
@@ -275,8 +277,8 @@
                 renderTable('tbody-vol-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
                 renderTable('tbody-vol-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
             } else if (target === 'pullback') {
-                renderTable('tbody-pb-kospi', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
-                renderTable('tbody-pb-kosdaq', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+                renderTable('tbody-pb-kospi', [], ['순위', '종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+                renderTable('tbody-pb-kosdaq', [], ['순위', '종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
             }
 
             try {
@@ -338,20 +340,22 @@
                         msgEl.innerHTML = `${state.message} (발견: ${state.signals_found})`;
                         
                         // 발견된 종목 실시간 렌더링
+                        let kospiItems = [];
+                        let kosdaqItems = [];
                         if (state.found_items && state.found_items.length > 0) {
-                            const kospiItems = state.found_items.filter(i => i.market === 'KOSPI').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
-                            const kosdaqItems = state.found_items.filter(i => i.market === 'KOSDAQ').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
+                            kospiItems = state.found_items.filter(i => i.market === 'KOSPI').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
+                            kosdaqItems = state.found_items.filter(i => i.market === 'KOSDAQ').map((i, idx) => ({ '순위': idx + 1, ...i.item }));
+                        }
                             
-                            if (target === 'price_gc') {
-                                renderTable('tbody-gc-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
-                                renderTable('tbody-gc-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
-                            } else if (target === 'vol_gc') {
-                                renderTable('tbody-vol-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
-                                renderTable('tbody-vol-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
-                            } else if (target === 'pullback') {
-                                renderTable('tbody-pb-kospi', kospiItems, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
-                                renderTable('tbody-pb-kosdaq', kosdaqItems, ['종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
-                            }
+                        if (target === 'price_gc') {
+                            renderTable('tbody-gc-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
+                            renderTable('tbody-gc-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'MA20', 'MA200', 'MA20_MA200갭(%)', '골든크로스일']);
+                        } else if (target === 'vol_gc') {
+                            renderTable('tbody-vol-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
+                            renderTable('tbody-vol-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'V_MA5', 'V_MA20', 'Volume_Ratio(배)']);
+                        } else if (target === 'pullback') {
+                            renderTable('tbody-pb-kospi', kospiItems, ['순위', '종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
+                            renderTable('tbody-pb-kosdaq', kosdaqItems, ['순위', '종목명', '시가총액(억원)', '종가', 'GC발생일', '눌림일', '신호유형']);
                         }
                         
                         const stopBtnEl = document.getElementById(`btn-stop-${prefix}`);
@@ -359,21 +363,21 @@
                             stopBtnEl.style.display = 'inline-block';
                         }
 
-                        if (!state.is_running && state.progress >= 100) {
+                        if (!state.is_running) {
                             clearInterval(intervals[target]);
-                            msgEl.innerHTML = "✅ 스캔 완료! (데이터 갱신 중...)";
                             if (stopBtnEl) stopBtnEl.style.display = 'none';
                             document.getElementById(btnId).style.display = 'inline-block';
                             
-                            // 페이지 새로고침(F5) 없이 즉시 리스트 새로고침
-                            fetchSignals().then(() => {
-                                msgEl.innerHTML = "✅ 스캔 및 업데이트 완료!";
-                            });
-                        } else if (!state.is_running && state.progress < 100 && state.progress > 0) {
-                            clearInterval(intervals[target]);
-                            // 오류나 중지됨
-                            document.getElementById(btnId).style.display = 'inline-block';
-                            if (stopBtnEl) stopBtnEl.style.display = 'none';
+                            if (state.progress >= 100) {
+                                msgEl.innerHTML = "✅ 스캔 완료! (데이터 갱신 중...)";
+                                // 페이지 새로고침(F5) 없이 즉시 리스트 새로고침
+                                fetchSignals().then(() => {
+                                    msgEl.innerHTML = "✅ 스캔 및 업데이트 완료!";
+                                });
+                            } else if (state.message === '대기 중') {
+                                // 서버 재시작 등으로 인한 비정상 통신종료 시 대기중 바 숨김
+                                document.getElementById(progId).style.display = 'none';
+                            }
                         }
                     }
                 } catch (e) { }
@@ -383,6 +387,7 @@
         // 일반 테이블 렌더링
         function renderTable(tbodyId, dataArray, columns) {
             const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
             tbody.innerHTML = '';
 
             if (!dataArray || dataArray.length === 0) {
@@ -442,8 +447,8 @@
             renderTable('tbody-gc-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'MA20', 'MA200', '갭(%)', '크로스일']);
             renderTable('tbody-vol-kospi', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
             renderTable('tbody-vol-kosdaq', [], ['순위', '종목명', '시가총액(억)', '종가', 'V_MA5', 'V_MA20', '비율(배)']);
-            renderTable('tbody-pb-kospi', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
-            renderTable('tbody-pb-kosdaq', [], ['종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+            renderTable('tbody-pb-kospi', [], ['순위', '종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
+            renderTable('tbody-pb-kosdaq', [], ['순위', '종목명', '시가총액', '종가', 'GC발생', '눌림일', '신호유형']);
         }
 
         // 초기 로딩: 스캔 결과 무조건 숨기고 텅 빈 상태로 시작 (스캔 버튼을 눌러야만 표시)

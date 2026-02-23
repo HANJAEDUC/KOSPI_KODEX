@@ -176,85 +176,147 @@ def scan_strategy(df: pd.DataFrame) -> dict | None:
     if signal_idx is None:
         return None
 
-    # 최종 결과
+    # ── 4단계: 거래량 골든크로스 (추가 요청) ──
+    v_ma5 = volume.rolling(5).mean()
+    curr_v5 = v_ma5.iloc[-1]
+    curr_v20 = vol_ma20.iloc[-1]
+    
+    vol_gc_ratio = 0
+    if not any(pd.isna([curr_v5, curr_v20])) and curr_v20 > 0 and curr_v5 > curr_v20:
+        vol_gc_ratio = round(curr_v5 / curr_v20, 2)
+
+    # 최종 결과 (가격 GC & Pullback 신호 + 볼륨 GC 신호 분리 반환용)
     last_close  = close.iloc[-1]
     last_ma20   = price_ma20.iloc[-1]
     last_ma200  = price_ma200.iloc[-1]
+    
+    gap_pct = round((last_ma20 / last_ma200 - 1) * 100, 2) if (not pd.isna(last_ma200) and last_ma200 > 0) else None
+
+    # 가격 GC 정보
+    price_gc_info = None
+    if curr_p20 > curr_p200 and not pd.isna(curr_p200):
+        # 방금 막 GC 된 경우만 잡을지, 단순히 역배열->정배열 상태만 잡을지는 현재 상태(>0)로 판단
+        price_gc_info = {
+            'MA20': round(last_ma20),
+            'MA200': round(last_ma200),
+            'MA20_MA200갭(%)': gap_pct,
+            '골든크로스일': gc_date.strftime('%Y-%m-%d') if gc_date else '진행중'
+        }
+
+    pullback_info = None
+    if signal_idx is not None:
+        pullback_info = {
+            'GC발생일':       gc_date.strftime('%Y-%m-%d') if gc_idx is not None else '-',
+            '눌림일':         pullback_date,
+            '눌림저가':       pullback_low,
+            '매수신호일':     signal_date,
+            '신호유형':       signal_type,
+        }
+
+    vol_info = None
+    if vol_gc_ratio > 0:
+        vol_info = {
+            'V_MA5': round(curr_v5),
+            'V_MA20': round(curr_v20),
+            'Volume_Ratio(배)': vol_gc_ratio
+        }
+
+    if price_gc_info is None and pullback_info is None and vol_info is None:
+        return None
 
     return {
-        'GC발생일':       gc_date.strftime('%Y-%m-%d') if gc_idx is not None else '-',
-        '눌림일':         pullback_date,
-        '눌림저가':       pullback_low,
-        '매수신호일':     signal_date,
-        '신호유형':       signal_type,
-        '종가':           int(last_close),
-        'MA20':           round(last_ma20),
-        'MA200':          round(last_ma200),
-        'MA20_MA200갭(%)': round((last_ma20 / last_ma200 - 1) * 100, 2) if last_ma200 else None,
+        '종가': int(last_close),
+        'price_gc': price_gc_info,
+        'pullback': pullback_info,
+        'vol_gc': vol_info
     }
 
+
+import argparse
 
 # ──────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────
-print("=" * 60)
-print("전략: 골든크로스 이후 눌림 매수")
-print(f"기준일: {BASE_DATE}  |  데이터 시작: {START_DATE}")
-print(f"GC 탐색 범위: 최근 {GC_LOOKBACK}일 / 눌림 허용: {PULLBACK_MIN}~{PULLBACK_MAX}일")
-print(f"MA20 터치 마진: ±{TOUCH_MARGIN*100:.0f}%")
-print("=" * 60)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="주식 스크리닝 (GC, 눌림매수, 거래량GC 분리 실행)")
+    parser.add_argument('--target', type=str, required=True, choices=['price_gc', 'vol_gc', 'pullback'],
+                        help="스캔할 대상을 지정합니다: price_gc, vol_gc, pullback")
+    args = parser.parse_args()
 
-all_signals = {}
+    print("=" * 60)
+    print(f"전략: 단일 스크리너 실행 (타겟: {args.target})")
+    print(f"기준일: {BASE_DATE}  |  데이터 시작: {START_DATE}")
+    print("=" * 60)
 
-for market in ['KOSPI', 'KOSDAQ']:
-    print(f"\n[{market}] 시가총액 상위 {TOP_N}개 추출 중...")
-    top_df  = get_top_tickers(market, TOP_N)
-    tickers = top_df.index.tolist()
-    print(f"  1위: {top_df.iloc[0]['종목명']}  {top_df.iloc[0]['시가총액(억원)']:,}억원")
-    print(f"  {TOP_N}위: {top_df.iloc[-1]['종목명']}  {top_df.iloc[-1]['시가총액(억원)']:,}억원")
+    all_pullback_signals = {}
+    all_price_gcs = {}
+    all_vol_gcs = {}
 
-    print(f"\n[{market}] 전략 스캔 시작...")
-    t0 = time.time()
-    signals = []
+    for market in ['KOSPI', 'KOSDAQ']:
+        print(f"\n[{market}] 시가총액 상위 {TOP_N}개 추출 중...")
+        top_df  = get_top_tickers(market, TOP_N)
+        tickers = top_df.index.tolist()
 
-    for i, ticker in enumerate(tickers, 1):
-        try:
-            df = stock.get_market_ohlcv(START_DATE, BASE_DATE, ticker)
-            result = scan_strategy(df)
-            if result:
-                result['종목명']       = top_df.loc[ticker, '종목명']
-                result['시가총액(억원)'] = top_df.loc[ticker, '시가총액(억원)']
-                signals.append((ticker, result))
-        except Exception:
-            pass
+        print(f"\n[{market}] 전략 스캔 시작...")
+        t0 = time.time()
+        
+        pb_signals = []
+        pgc_signals = []
+        vgc_signals = []
 
-        if i % 50 == 0 or i == TOP_N:
-            elapsed = time.time() - t0
-            print(f"  [{i:>3}/{TOP_N}] {i/TOP_N*100:5.1f}% 완료...  신호 {len(signals)}개 발견  ({elapsed:.0f}s)")
-        time.sleep(SLEEP_SEC)
+        for i, ticker in enumerate(tickers, 1):
+            try:
+                df = stock.get_market_ohlcv(START_DATE, BASE_DATE, ticker)
+                result = scan_strategy(df)
+                if result:
+                    base_info = {
+                        '종목명': top_df.loc[ticker, '종목명'],
+                        '시가총액(억원)': top_df.loc[ticker, '시가총액(억원)'],
+                        '종가': result['종가']
+                    }
+                    
+                    if args.target == 'pullback' and result['pullback']:
+                        pb_signals.append((ticker, {**base_info, **result['pullback']}))
+                    elif args.target == 'price_gc' and result['price_gc']:
+                        pgc_signals.append((ticker, {**base_info, **result['price_gc']}))
+                    elif args.target == 'vol_gc' and result['vol_gc']:
+                        vgc_signals.append((ticker, {**base_info, **result['vol_gc']}))
+            except Exception:
+                pass
 
-    # 결과 정리
-    if signals:
-        result_df = pd.DataFrame(
-            [r for _, r in signals],
-            index=[t for t, _ in signals]
-        )
-        result_df.index.name = '종목코드'
-        result_df = result_df.sort_values('시가총액(억원)', ascending=False)
-        result_df.insert(0, '순위(시총)', range(1, len(result_df)+1))
+            if i % 50 == 0 or i == TOP_N:
+                elapsed = time.time() - t0
+                # 현재 처리 중인 타겟에 맞춰 진행 상황 출력 (정규식 매칭용)
+                current_len = len(pb_signals) if args.target == 'pullback' else (len(pgc_signals) if args.target == 'price_gc' else len(vgc_signals))
+                print(f"  [{i:>3}/{TOP_N}] {i/TOP_N*100:5.1f}% 완료...  신호 {current_len}개 발견  ({elapsed:.0f}s)")
+            time.sleep(SLEEP_SEC)
 
-        cols = ['순위(시총)', '종목명', '시가총액(억원)', '종가',
-                'MA20', 'MA200', 'MA20_MA200갭(%)',
-                'GC발생일', '눌림일', '눌림저가', '매수신호일', '신호유형']
-        result_df = result_df[cols]
-        all_signals[market] = result_df
+        # DataFrame 변환 및 저장 헬퍼 함수
+        def save_results(signals_list, market_name, prefix, sort_col, asc=False):
+            if not signals_list:
+                print(f"  ⚠ {prefix} 신호 없음")
+                return pd.DataFrame()
+                
+            res_df = pd.DataFrame([r for _, r in signals_list], index=[t for t, _ in signals_list])
+            res_df.index.name = '종목코드'
+            
+            if sort_col in res_df.columns:
+                res_df = res_df.sort_values(sort_col, ascending=asc)
+            
+            # 순위(시총) 부여
+            res_df.insert(0, '순위(시총)', range(1, len(res_df)+1))
+            
+            fname = f'/Users/jaeduchan/Documents/jhan/antigravity/KOSPI_KODEX/{market_name.lower()}_{prefix}.csv'
+            res_df.to_csv(fname, encoding='utf-8-sig')
+            return res_df
 
-        fname = f'/Users/jaeduchan/Documents/jhan/antigravity/KOSPI_KODEX/{market.lower()}_gc_pullback_signal.csv'
-        result_df.to_csv(fname, encoding='utf-8-sig')
-        print(f"\n  ✅ {len(result_df)}개 신호 저장: {fname}")
-    else:
-        all_signals[market] = pd.DataFrame()
-        print(f"\n  ⚠ 신호 없음")
+        # 타겟에 따라 지정된 CSV 1개만 저장
+        if args.target == 'pullback':
+            all_pullback_signals[market] = save_results(pb_signals, market, 'gc_pullback_signal', '시가총액(억원)')
+        elif args.target == 'price_gc':
+            all_price_gcs[market] = save_results(pgc_signals, market, 'golden_cross', '시가총액(억원)')
+        elif args.target == 'vol_gc':
+            all_vol_gcs[market] = save_results(vgc_signals, market, 'volume_ma', 'Volume_Ratio(배)')
 
 # ──────────────────────────────────────────────
 # 결과 출력

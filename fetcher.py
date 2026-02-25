@@ -12,6 +12,7 @@ from pykrx import stock as krx
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, 'data')
 
 # ──────────────────────────────────────────────
 # 유틸
@@ -35,6 +36,51 @@ def ticker_name(code: str) -> str:
         return krx.get_market_ticker_name(code)
     except:
         return code
+
+
+def get_ohlcv(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """로컬 데이터에서 OHLCV를 가져오고 부족한 부분만 업데이트"""
+    file_path = os.path.join(DATA_DIR, f"{ticker}.csv")
+    
+    # 1. 로컬 파일 확인
+    local_df = None
+    if os.path.exists(file_path):
+        try:
+            local_df = pd.read_csv(file_path, index_col=0, parse_dates=True)
+        except:
+            local_df = None
+
+    # 2. 부족한 데이터 판단
+    target_end_dt = pd.to_datetime(end_date)
+    
+    if local_df is not None and not local_df.empty:
+        last_date = local_df.index[-1]
+        
+        # 이미 최신이면 바로 반환
+        if last_date >= target_end_dt:
+            return local_df[start_date:end_date]
+        
+        # 부족하면 오늘치만 추가로 받기
+        try:
+            fetch_start = (last_date + timedelta(days=1)).strftime('%Y%m%d')
+            delta_df = krx.get_market_ohlcv(fetch_start, end_date, ticker)
+            if delta_df is not None and not delta_df.empty:
+                new_df = pd.concat([local_df, delta_df])
+                new_df.to_csv(file_path, encoding='utf-8-sig')
+                return new_df[start_date:end_date]
+        except:
+            pass
+            
+    # 3. 데이터가 없거나 업데이트 실패 시 통째로 받기 (기존 방식)
+    try:
+        df = krx.get_market_ohlcv(start_date, end_date, ticker)
+        # 받은 김에 저장 (백그라운드 수집을 도와줌)
+        if df is not None and not df.empty:
+            if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
+            df.to_csv(file_path, encoding='utf-8-sig')
+        return df
+    except:
+        return None
 
 
 # ──────────────────────────────────────────────

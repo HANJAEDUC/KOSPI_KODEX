@@ -60,10 +60,11 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
         current_market = ""
 
         for line in iter(process.stdout.readline, ''):
+            if state['stopped']:
+                break
             if not line:
                 break
             line = line.strip()
-            print("DBG-LINE:", line)
             if not line:
                 continue
                 
@@ -77,17 +78,24 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
                     pass
                 continue
             
-            if "[KOSPI] 시가총액 상위" in line:
+            if "[KOSPI]" in line and "시가총액 상위" in line:
                 current_market = "KOSPI"
-                state['message'] = '2. KOSPI 주식 종목표 다운로드 중 (KRX)...'
-            elif "[KOSPI] 전략 스캔 시작" in line:
-                state['message'] = 'KOSPI 스캔 중...'
-            elif "[KOSDAQ] 시가총액 상위" in line:
+                state['message'] = 'KOSPI 주목 종목 추출 중...'
+            elif "[KOSPI]" in line and "전략 스캔 시작" in line:
+                current_market = "KOSPI"
+                state['message'] = 'KOSPI 스캔 시작'
+            elif "[KOSDAQ]" in line and "시가총액 상위" in line:
                 current_market = "KOSDAQ"
-                state['message'] = '3. KOSDAQ 주식 종목표 다운로드 중 (KRX)...'
-            elif "[KOSDAQ] 전략 스캔 시작" in line:
-                state['message'] = 'KOSDAQ 스캔 중...'
-                state['message'] = 'KOSDAQ 스캔 중...'
+                state['message'] = 'KOSDAQ 종목 추출 중...'
+            elif "[KOSDAQ]" in line and "전략 스캔 시작" in line:
+                current_market = "KOSDAQ"
+                state['message'] = 'KOSDAQ 스캔 시작'
+            
+            # 진행 표시 줄에서 시장명 강제 추출 (예: [KOSDAQ][ 1/10])
+            if "[KOSPI][" in line:
+                current_market = "KOSPI"
+            elif "[KOSDAQ][" in line:
+                current_market = "KOSDAQ"
                 
             match = pattern.search(line)
             if match:
@@ -105,6 +113,10 @@ def run_scanner_bg(target_type, target_date=None, top_n=500):
                 elif current_market == "KOSDAQ":
                     state['progress'] = 50.0 + (raw_pct / 2)
                     state['message'] = f'[2/2] KOSDAQ 탐색 중... ({current_cnt}/{total_cnt})'
+                else:
+                    # 시장이 감지되지 않은 경우에도 진행도는 올림
+                    state['progress'] = raw_pct
+                    state['message'] = f'스캔 진행 중... ({current_cnt}/{total_cnt})'
                     
                 state['signals_found'] = sigs
                 
@@ -185,9 +197,12 @@ def api_scan_stop():
         
     try:
         state['stopped'] = True
-        state['process'].terminate()
+        if state['process']:
+            state['process'].kill() # terminate보다 확실하게 즉시 종료
+        state['is_running'] = False # 즉시 상태를 변경하여 프론트엔드가 감지하게 함
         return jsonify({'ok': True, 'message': '스캔을 중지합니다.'})
     except Exception as e:
+        state['is_running'] = False # 에러가 나더라도 상태는 풀어서 다시 시작 가능하게 함
         return jsonify({'ok': False, 'message': str(e)})
 
 
@@ -210,9 +225,16 @@ def api_scan_status():
     })
 
 
+@app.after_request
+def add_header(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
 if __name__ == '__main__':
     print("=" * 50)
     print("📊 주식 스크리닝 대시보드 시작")
     print("   http://localhost:8080")
     print("=" * 50)
-    app.run(debug=True, port=8080, host='0.0.0.0')
+    app.run(debug=False, port=8080, host='0.0.0.0')

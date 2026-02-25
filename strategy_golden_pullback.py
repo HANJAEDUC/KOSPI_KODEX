@@ -30,6 +30,7 @@ import numpy as np
 import time
 import sys
 from typing import Optional
+from fetcher import get_ohlcv  # 로컬 데이터 연동
 
 # stdout/stderr 강제 UTF-8 모드 및 실시간 출력(버퍼링 제거) 방침
 if sys.stdout.encoding.lower() != 'utf-8':
@@ -269,6 +270,9 @@ if __name__ == '__main__':
     all_price_gcs = {}
     all_vol_gcs = {}
 
+    # 누적 발견 신호 수 (UI 표시용)
+    total_found_cnt = 0
+
     for market in ['KOSPI', 'KOSDAQ']:
         print(f"\n[{market}] 시가총액 상위 {args.top_n if args.top_n > 0 else '전체'}개 추출 중...", flush=True)
         top_df  = get_top_tickers(market, args.top_n)
@@ -284,11 +288,13 @@ if __name__ == '__main__':
 
         for i, ticker in enumerate(tickers, 1):
             try:
-                df = stock.get_market_ohlcv(START_DATE, BASE_DATE, ticker)
+                # fetcher를 통해 로컬 우선 데이터 로드 (매우 빠름)
+                df = get_ohlcv(ticker, START_DATE, BASE_DATE)
                 result = scan_strategy(df)
                 if result:
                     base_info = {
                         '종목명': top_df.loc[ticker, '종목명'],
+                        '종목코드': ticker,
                         '시가총액(억원)': top_df.loc[ticker, '시가총액(억원)'],
                         '종가': result['종가']
                     }
@@ -297,12 +303,15 @@ if __name__ == '__main__':
                     if args.target == 'pullback' and result['pullback']:
                         found_item = {**base_info, **result['pullback']}
                         pb_signals.append((ticker, found_item))
+                        total_found_cnt += 1
                     elif args.target == 'price_gc' and result['price_gc']:
                         found_item = {**base_info, **result['price_gc']}
                         pgc_signals.append((ticker, found_item))
+                        total_found_cnt += 1
                     elif args.target == 'vol_gc' and result['vol_gc']:
                         found_item = {**base_info, **result['vol_gc']}
                         vgc_signals.append((ticker, found_item))
+                        total_found_cnt += 1
                         
                     if found_item:
                         import json
@@ -319,9 +328,8 @@ if __name__ == '__main__':
 
             if True: # 모든 종목(매 루프)마다 실시간 출력 (리얼타임 퍼센트 적용)
                 elapsed = time.time() - t0
-                # 현재 처리 중인 타겟에 맞춰 진행 상황 출력 (정규식 매칭용)
-                current_len = len(pb_signals) if args.target == 'pullback' else (len(pgc_signals) if args.target == 'price_gc' else len(vgc_signals))
-                print(f"  [{i:>3}/{total_tickers}] 신호 {current_len}개 발견  ({elapsed:.0f}s)", flush=True)
+                # [시장명][현재/전체] 신호 N개 발견 형식으로 출력하여 app.py에서 인식하기 쉽게 함
+                print(f"  [{market}][{i:>3}/{total_tickers}] 신호 {total_found_cnt}개 발견  ({elapsed:.0f}s)", flush=True)
             time.sleep(SLEEP_SEC)
 
         # DataFrame 변환 및 저장 헬퍼 함수
@@ -330,20 +338,17 @@ if __name__ == '__main__':
                 print(f"  ⚠ {prefix} 신호 없음")
                 return pd.DataFrame()
                 
-            res_df = pd.DataFrame([r for _, r in signals_list], index=[t for t, _ in signals_list])
-            res_df.index.name = '종목코드'
+            res_df = pd.DataFrame([r for _, r in signals_list])
             
             if sort_col in res_df.columns:
                 res_df = res_df.sort_values(sort_col, ascending=asc)
             
-            # 순위 추가 및 인덱스 초기화
-            res_df = res_df.reset_index()
+            # 순위 추가
             res_df.insert(0, '순위', range(1, len(res_df)+1))
-            res_df = res_df.rename(columns={'index': '종목코드'})
             
             import os
             fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'{market_name.lower()}_{prefix}.csv')
-            res_df.to_csv(fname, encoding='utf-8-sig')
+            res_df.to_csv(fname, encoding='utf-8-sig', index=False)
             return res_df
 
         # 타겟에 따라 지정된 CSV 1개만 저장
@@ -359,8 +364,14 @@ if __name__ == '__main__':
 # ──────────────────────────────────────────────
 print("\n" + "=" * 60)
 for market in ['KOSPI', 'KOSDAQ']:
-    df = all_pullback_signals.get(market, pd.DataFrame())
-    print(f"\n=== {market} 골든크로스 눌림 매수 신호 (총 {len(df)}개) ===")
+    if args.target == 'pullback':
+        df = all_pullback_signals.get(market, pd.DataFrame())
+    elif args.target == 'price_gc':
+        df = all_price_gcs.get(market, pd.DataFrame())
+    else:
+        df = all_vol_gcs.get(market, pd.DataFrame())
+        
+    print(f"\n=== {market} {args.target} 신호 (총 {len(df)}개) ===")
     if not df.empty:
         print(df.to_string(index=True))
     else:
